@@ -1,3 +1,4 @@
+import json
 import discord
 from discord.ext import commands
 import aiohttp
@@ -6,6 +7,8 @@ import io
 import openai
 from dotenv import load_dotenv
 import os
+import argparse
+import re
 
 # Load environment variables from the .env file
 load_dotenv()
@@ -22,6 +25,26 @@ intents = discord.Intents.default()
 #intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+
+def parse_command(commands):    
+    parser = argparse.ArgumentParser()
+
+    # Define arguments
+    parser.add_argument('--prompt', type=str, required=True)
+    parser.add_argument('--batch_size', type=int, required=False, default = 1)
+    parser.add_argument('--cfg_scale', type=int, required=False, default = 7)
+    parser.add_argument('--seed', type=int, required=False, default = -1)
+    parser.add_argument('--steps', type=int, required=False, default = 50)
+    
+    # Split the string at spaces, excluding spaces within quotes
+    split_list = re.findall(r'"[^"]+"|\S+', commands)
+
+    # Remove the quotes from the split values
+    split_list = [item.strip('"') for item in split_list]
+    args = parser.parse_args(split_list)
+
+    return args.__dict__
 
 
 @bot.event
@@ -47,17 +70,15 @@ async def hello(ctx):
 
 # Command: !diffusion
 @bot.command()
-async def diffusion(ctx, *args):
+async def diffusion(ctx, *, args):
     # This function will be called when '!diffusion' command is used in any channel the bot has access to
-    arg = ' '.join(args)
-    payload = {
-        "prompt": arg,
-        "steps": 30,
-        "batch_size": 4
-    }
+    payload = parse_command(args)
+
+    await ctx.message.add_reaction('\U0001F440')
 
     async with aiohttp.ClientSession() as session:
         async with session.post(f'{API_URL}/sdapi/v1/txt2img', json=payload) as response:
+            # Add reaction to acknowledge the message
             r = await response.json()
 
             # Check if the request was successful
@@ -83,6 +104,8 @@ async def diffusion(ctx, *args):
                 #await ctx.send(f'Parameters: {parameters}')
                 # Send info to the channel
                 #await ctx.send(f'Info: {info}')
+
+
 
             else:
                 # If not successful, send an error message
