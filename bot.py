@@ -72,44 +72,53 @@ async def hello(ctx):
 @bot.command()
 async def diffusion(ctx, *, args):
     # This function will be called when '!diffusion' command is used in any channel the bot has access to
-    payload = parse_command(args)
 
-    await ctx.message.add_reaction('\U0001F440')
+    try:
+        payload = parse_command(args)
+        success = True
+    except SystemExit:
+        await ctx.reply(f'Error: Incorrect command usage.\n!diffusion --prompt "kexchoklad" --steps 10 --batch_size 1 --cfg_scale 7')
+        success = False
+    except Exception as e:
+        await ctx.reply(f'Error: {e}')
+        success = False
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f'{API_URL}/sdapi/v1/txt2img', json=payload) as response:
-            # Add reaction to acknowledge the message
-            r = await response.json()
+    if success:
+        await ctx.message.add_reaction('\U0001F440')
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f'{API_URL}/sdapi/v1/txt2img', json=payload) as response:
+                # Add reaction to acknowledge the message
+                r = await response.json()
 
-            # Check if the request was successful
-            if response.status == 200:
-                # If successful, send the response data back to the channel
-                # Extract data from response
-                images = r.get('images', [])
-                parameters = r.get('parameters', {})
-                info = r.get('info', '')
+                # Check if the request was successful
+                if response.status == 200:
+                    # If successful, send the response data back to the channel
+                    # Extract data from response
+                    images = r.get('images', [])
+                    parameters = r.get('parameters', {})
+                    info = r.get('info', '')
 
-                # Send images to the channel
-                for i, image in enumerate(images):
-                    try:
-                        # Try to decode the base64 string and create an image file
-                        image_bytes = base64.b64decode(image)
-                        image_file = io.BytesIO(image_bytes)
-                        await ctx.reply(file=discord.File(image_file, f'image{i}.png'))
-                    except Exception as e:
-                        # If there's an error, send a message
-                        await ctx.reply(f'Error sending image: {e}')
+                    # Send images to the channel
+                    for i, image in enumerate(images):
+                        try:
+                            # Try to decode the base64 string and create an image file
+                            image_bytes = base64.b64decode(image)
+                            image_file = io.BytesIO(image_bytes)
+                            await ctx.reply(file=discord.File(image_file, f'image{i}.png'))
+                        except Exception as e:
+                            # If there's an error, send a message
+                            await ctx.reply(f'Error sending image: {e}')
 
-                # Send parameters to the channel
-                #await ctx.send(f'Parameters: {parameters}')
-                # Send info to the channel
-                #await ctx.send(f'Info: {info}')
+                    # Send parameters to the channel
+                    #await ctx.send(f'Parameters: {parameters}')
+                    # Send info to the channel
+                    #await ctx.send(f'Info: {info}')
 
 
 
-            else:
-                # If not successful, send an error message
-                await ctx.reply(f'Error: {response.status}')
+                else:
+                    # If not successful, send an error message
+                    await ctx.reply(f'Error: {response.status}')
 
 
 # Command: !chat
