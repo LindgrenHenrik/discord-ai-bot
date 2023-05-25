@@ -8,6 +8,7 @@ import openai
 import aiohttp
 import argparse
 from dotenv import load_dotenv
+import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -22,6 +23,8 @@ if not API_URL or not OPENAI_API_KEY or not BOT_TOKEN:
 
 # Set OpenAI API key
 openai.api_key = OPENAI_API_KEY
+
+semaphore = asyncio.Lock()  # Semaphore to control access
 
 # Create bot instance
 intents = discord.Intents.default()
@@ -70,6 +73,26 @@ async def on_ready():
     for guild in bot.guilds:
         print(f'Connected to guild: {guild.name} (id: {guild.id})')
 
+# Emoji mapping for progress stages
+PROGRESS_EMOJIS = ["\u0031\u20E3", "\u0032\u20E3", "\u0033\u20E3", "\u0034\u20E3", "\u0035\u20E3", "\u0036\u20E3", "\u0037\u20E3", "\u0038\u20E3", "\u0039\u20E3", "\U0001F51F"]
+
+async def fetch_progress(ctx, message):
+    """Fetch progress from the API and send it back to the channel"""
+    last_stage = -1
+    while True:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f'{API_URL}/sdapi/v1/progress', params={'skip_current_image': 'true'}) as response:
+                r = await response.json()
+                if response.status == 200:
+                    progress = r.get('progress', 0)
+                    current_stage = min(int(progress * 10), len(PROGRESS_EMOJIS) - 1)
+                    if current_stage > last_stage:
+                        await message.add_reaction(PROGRESS_EMOJIS[current_stage])
+                        last_stage = current_stage
+                    print(f'{message.author} progress {progress}')
+                else:
+                    await ctx.reply(f'Error: {response.status}')
+        await asyncio.sleep(2)
 
 @bot.command(name='hello')
 async def hello(ctx):
@@ -88,9 +111,14 @@ async def hello(ctx):
 @bot.command()
 async def diffusion(ctx, *, args):
     """Diffusion command handler"""
+    await ctx.message.add_reaction('\U0001F440')
+    await semaphore.acquire()
+    fetch_task = bot.loop.create_task(fetch_progress(ctx,ctx.message))
     try:
+        print(f'Starting diffusion request from {ctx.message.author} with args: {args}')
         payload = parse_command(args)
-        await ctx.message.add_reaction('\U0001F440')
+
+        # Start the progress fetching coroutine
         async with aiohttp.ClientSession() as session:
             async with session.post(f'{API_URL}/sdapi/v1/txt2img', json=payload) as response:
                 r = await response.json()
@@ -102,6 +130,8 @@ async def diffusion(ctx, *, args):
         await ctx.reply(f'Error: Incorrect command usage.\n!diffusion --prompt "kexchoklad" --steps 10 --batch_size 1 --cfg_scale 7')
     except Exception as e:
         await ctx.reply(f'Error: {e}')
+    fetch_task.cancel()  # Cancel the fetch_progress coroutine
+    semaphore.release()
 
 
 @bot.command()
