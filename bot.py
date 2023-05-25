@@ -97,24 +97,25 @@ async def diffusion(ctx, *, args):
                     images = r.get('images', [])
                     parameters = r.get('parameters', {})
                     info = r.get('info', '')
-
+                    files = []
                     # Send images to the channel
                     for i, image in enumerate(images):
                         try:
                             # Try to decode the base64 string and create an image file
                             image_bytes = base64.b64decode(image)
                             image_file = io.BytesIO(image_bytes)
-                            await ctx.reply(file=discord.File(image_file, f'image{i}.png'))
+                            files.append(discord.File(image_file, f'image{i}.png'))
                         except Exception as e:
                             # If there's an error, send a message
                             await ctx.reply(f'Error sending image: {e}')
+                            return
 
+                    # Send all images in one message
+                    await ctx.reply(files=files)
                     # Send parameters to the channel
                     #await ctx.send(f'Parameters: {parameters}')
                     # Send info to the channel
                     #await ctx.send(f'Info: {info}')
-
-
 
                 else:
                     # If not successful, send an error message
