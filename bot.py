@@ -148,13 +148,12 @@ async def diffusion(ctx, *, args):
 
     fetch_task = bot.loop.create_task(fetch_progress(ctx,ctx.message))
 
+    ERROR = True
     try:
         print(f'Starting diffusion request from {ctx.message.author} with args: {args}')
         payload = parse_command(args)
         prompt = payload['prompt']
 
-        if random.random() < 0.25:
-            await ctx.reply(generate_promt_resp(payload['prompt']))
 
         # Start the progress fetching coroutine
         async with aiohttp.ClientSession() as session:
@@ -164,10 +163,16 @@ async def diffusion(ctx, *, args):
                     await send_images(r.get('images', []), ctx)
                 else:
                     await ctx.reply(f'Error: {response.status}')
+        ERROR = False
     except SystemExit:
-        await ctx.reply(f'Error: Incorrect command usage.\n!diffusion --prompt "kexchoklad" --steps 10 --batch_size 1 --cfg_scale 7')
+        await ctx.reply(f'Error: Incorrect command usage.\n Here is an exapmle or use !info to get full command info: \n!diffusion --prompt "kexchoklad" --steps 10 --batch_size 1 --cfg_scale 7')
     except Exception as e:
-        await ctx.reply(f'Error: {e}')
+        print(f'Error getting stable diffusion from network: {e}')
+
+    if ERROR:
+        await ctx.reply(generate_promt_resp('An error has occurred, an image was not able to be generated from the stable diffusion neural network'))
+    elif random.random() < 0.25:
+        await ctx.reply(generate_promt_resp(payload['prompt']))
     
     while True:
         found_me = 0
