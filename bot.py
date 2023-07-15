@@ -13,6 +13,7 @@ import time
 import requests
 import json
 import random
+import docker
 
 # Load environment variables
 load_dotenv()
@@ -237,6 +238,19 @@ async def meme(ctx):
 
     await ctx.send(memes)
 
+
+@bot.command()
+async def rs_nn(ctx, *args):
+    STABLE_DiFFUSION_ID = '085c912e4bbbdbba0b014af5321b0f17bab88df54c63b1dcd8c4b0d491f028c6'
+    client = docker.from_env()
+    try:
+        container = client.containers.get(STABLE_DiFFUSION_ID)
+        container.restart()
+        await ctx.reply(f'The stable diffusion Docker container has been restarted')
+    except docker.errors.NotFound:
+        await ctx.reply(f'No such container')
+    except docker.errors.APIError as e:
+        await ctx.reply(f'An error occurred')
 
 # Run the bot
 bot.run(BOT_TOKEN)
