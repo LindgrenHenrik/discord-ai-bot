@@ -12,6 +12,7 @@ import asyncio
 import time
 import requests
 import json
+import random
 
 # Load environment variables
 load_dotenv()
@@ -151,6 +152,9 @@ async def diffusion(ctx, *, args):
         payload = parse_command(args)
         prompt = payload['prompt']
 
+        if random.random() < 0.25:
+            await ctx.reply(generate_promt_resp(payload['prompt']))
+
         # Start the progress fetching coroutine
         async with aiohttp.ClientSession() as session:
             async with session.post(f'{API_URL}/sdapi/v1/txt2img', json=payload) as response:
@@ -213,6 +217,16 @@ async def chat(ctx, *args):
     except openai.error.InvalidRequestError as e:
         await ctx.reply(f'Error: {str(e)}')
 
+
+
+def generate_promt_resp(arg):
+    model = "gpt-3.5-turbo"
+    response = openai.ChatCompletion.create(
+        model=model,
+        messages=[{"role": "system", "content": "you are a gen z teen with hella rizz and swagg, respond as if you have it, cap, rizz for real etc, The user text is a prompt that will generate a picture using stable diffusion, respoand a roast on why the prompt is bad using rizz, more rizz, more emotes"},
+        {"role": "user", "content": arg}])
+    chat_response = response['choices'][0]['message']['content']
+    return chat_response
 
 
 @bot.command(name='meme')
