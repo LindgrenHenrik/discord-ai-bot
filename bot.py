@@ -14,6 +14,7 @@ import requests
 import json
 import random
 import docker
+from requests.exceptions import Timeout, ConnectionError, TooManyRedirects
 
 # Load environment variables
 load_dotenv()
@@ -47,18 +48,28 @@ def parse_command(commands):
     parser.add_argument('--cfg_scale', type=int, required=False, default=7)
     parser.add_argument('--seed', type=int, required=False, default=-1)
     parser.add_argument('--steps', type=int, required=False, default=25)
+    parser.add_argument('--width', type=int, required=False, default=512)
+    parser.add_argument('--height', type=int, required=False, default=512)
 
     # Split string and remove quotes
     split_list = re.findall(r'"[^"]+"|\S+', commands)
     split_list = [item.strip('"') for item in split_list]
-    args = parser.parse_args(split_list)
+
+    try:
+        args = parser.parse_args(split_list)
+    except argparse.ArgumentError as e:
+        return None, f"Argument parsing error: {e}"
+    except SystemExit as e:
+        return None, f"Argument parsing error: {e}"
 
     # Apply constraints
     args.steps = max(1, min(args.steps, 50))
     args.cfg_scale = max(1, min(args.cfg_scale, 30))
     args.batch_size = max(1, min(args.batch_size, 10))
+    args.width = max(1, max(args.width, 512))
+    args.height = max(1, max(args.height, 512))
 
-    return args.__dict__
+    return vars(args), None
 
 
 async def send_images(images, ctx):
@@ -113,7 +124,7 @@ async def fetch_progress(ctx, message):
                     progress = r.get('progress', 0)
                     current_stage = min(int(progress * 10), len(PROGRESS_EMOJIS) - 1)
                     if current_stage > last_stage:
-                        await message.add_reaction(PROGRESS_EMOJIS[current_stage])
+                        await safe_add_reaction(message, PROGRESS_EMOJIS[current_stage])
                         last_stage = current_stage
                     print(f'{message.author} progress {progress}')
                 else:
@@ -140,20 +151,21 @@ async def diffusion(ctx, *, args):
 
     start_time = time.time() # start a timer
 
-    await ctx.message.add_reaction('\U0001F440') # side eye emoji
+    await safe_add_reaction(ctx.message, '\U0001F440')
     if semaphore.locked():
-        await ctx.message.add_reaction('\u23F2')  # Clock emoji
+        await safe_add_reaction(ctx.message, '\u23F2')  # Clock emoji
     await semaphore.acquire()
-    await ctx.message.remove_reaction('\u23F2', bot.user)
+    await safe_remove_reaction(ctx.message, '\u23F2', bot.user)
 
     fetch_task = bot.loop.create_task(fetch_progress(ctx,ctx.message))
 
-    ERROR = True
+    SUCCESS = False
+    SKIP = True
     try:
         print(f'Starting diffusion request from {ctx.message.author} with args: {args}')
-        payload = parse_command(args)
-        prompt = payload['prompt']
-
+        payload, parse_error = parse_command(args)
+        if parse_error:
+            raise SystemExit(parse_error)
 
         # Start the progress fetching coroutine
         async with aiohttp.ClientSession() as session:
@@ -163,50 +175,85 @@ async def diffusion(ctx, *, args):
                     await send_images(r.get('images', []), ctx)
                 else:
                     await ctx.reply(f'Error: {response.status}')
-        ERROR = False
+        SUCCESS = True
     except SystemExit:
         await ctx.reply(f'Error: Incorrect command usage.\n Here is an exapmle or use !info to get full command info: \n!diffusion --prompt "kexchoklad" --steps 10 --batch_size 1 --cfg_scale 7')
+        SKIP = False
     except Exception as e:
         print(f'Error getting stable diffusion from network: {e}')
+        await ctx.reply(f'An error occurred: {str(e)}')
+    finally:
+        fetch_task.cancel()  # Cancel the fetch_progress coroutine
+        semaphore.release()
 
-    if ERROR:
-        await ctx.reply(generate_promt_resp('An error has occurred, an image was not able to be generated from the stable diffusion neural network'))
-    elif random.random() < 0.25:
-        await ctx.reply(generate_promt_resp(payload['prompt']))
+    if SUCCESS and (random.random() < 0.25):
+        await ctx.reply(await generate_prompt_resp(payload['prompt']))
+    elif SKIP:
+        await ctx.reply(await generate_prompt_resp('An error has occurred, an image was not able to be generated from the stable diffusion neural network'))
     
     while True:
         found_me = 0
         for reaction in ctx.message.reactions:
             if reaction.me:
-                await reaction.remove(bot.user)
+                await safe_remove_reaction(ctx.message, reaction.emoji, bot.user)
                 found_me = 1
                 break
         if found_me:
             continue
         else:
             break
-    # Remove all reactions
-    #await ctx.message.clear_reactions()
-    #await ctx.message.reactions[0].remove(bot.user)
-    await ctx.message.add_reaction('\u2705')  # Checkmark emoji
 
-    # Calculate the duration
+    await safe_add_reaction(ctx.message, '\u2705')  # Checkmark emoji
+
     duration = time.time() - start_time
-    
-    # Reply with the duration
     #await ctx.reply(f"It took me {duration:.2f} seconds to create an image based on '{prompt}'.")
 
-    fetch_task.cancel()  # Cancel the fetch_progress coroutine
-    semaphore.release()
+
+async def safe_remove_reaction(message, emoji, user, max_retries=5):
+    """Safely remove a reaction, retrying on rate limit errors."""
+    for attempt in range(max_retries):
+        try:
+            await message.remove_reaction(emoji, user)
+            return
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.response.headers.get("Retry-After")
+                if retry_after:
+                    retry_after = float(retry_after)
+                    print(f"Rate limited. Retrying after {retry_after} seconds.")
+                    await asyncio.sleep(retry_after)
+                else:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                raise e
+
+async def safe_add_reaction(message, emoji, max_retries=5):
+    """Safely add a reaction, retrying on rate limit errors."""
+    for attempt in range(max_retries):
+        try:
+            await message.add_reaction(emoji)
+            return
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.response.headers.get("Retry-After")
+                if retry_after:
+                    retry_after = float(retry_after)
+                    print(f"Rate limited. Retrying after {retry_after} seconds.")
+                    await asyncio.sleep(retry_after)
+                else:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                raise e
 
 
 @bot.command()
 async def chat(ctx, *args):
     """Chat command handler"""
     arg = ' '.join(args)
-    model = "gpt-3.5-turbo"
+    model = "gpt-4o-mini"
     try:
-        response = openai.ChatCompletion.create(
+        response = await retry_openai_request(
+            openai.ChatCompletion.create,
             model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
@@ -225,12 +272,25 @@ async def chat(ctx, *args):
 
 
 
-def generate_promt_resp(arg):
-    model = "gpt-3.5-turbo"
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=[{"role": "system", "content": "you are a gen z teen with hella rizz and swagg, respond as if you have it, cap, rizz for real etc, The user text is a prompt that will generate a picture using stable diffusion, respoand a roast on why the prompt is bad using rizz, more rizz, more emotes"},
-        {"role": "user", "content": arg}])
+async def retry_openai_request(request_function, *args, max_retries=5, **kwargs):
+    """Retries a given OpenAI API request function upon connection failure."""
+    for attempt in range(max_retries):
+        try:
+            return request_function(*args, **kwargs)
+        except (openai.error.APIConnectionError, openai.error.Timeout, ConnectionError, Timeout, TooManyRedirects) as e:
+            print(f"Error communicating with OpenAI: {e}. Retrying ({attempt + 1}/{max_retries})...")
+            await asyncio.sleep(2 ** attempt)
+    raise Exception(f"Failed to complete OpenAI request after {max_retries} attempts")
+
+async def generate_prompt_resp(arg):
+    response = await retry_openai_request(
+        openai.ChatCompletion.create,
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "you are a gen z teen with hella rizz and swag, respond as if you have it, cap, rizz for real etc, The user text is a prompt that will generate a picture using stable diffusion, respond a roast on why the prompt is bad using rizz, more rizz, more emotes"},
+            {"role": "user", "content": arg}
+        ]
+    )
     chat_response = response['choices'][0]['message']['content']
     return chat_response
 
@@ -244,18 +304,18 @@ async def meme(ctx):
     await ctx.send(memes)
 
 
-@bot.command()
-async def rs_nn(ctx, *args):
-    STABLE_DiFFUSION_ID = '085c912e4bbbdbba0b014af5321b0f17bab88df54c63b1dcd8c4b0d491f028c6'
-    client = docker.from_env()
-    try:
-        container = client.containers.get(STABLE_DiFFUSION_ID)
-        container.restart()
-        await ctx.reply(f'The stable diffusion Docker container has been restarted')
-    except docker.errors.NotFound:
-        await ctx.reply(f'No such container')
-    except docker.errors.APIError as e:
-        await ctx.reply(f'An error occurred')
+# @bot.command()
+# async def rs_nn(ctx, *args):
+#     STABLE_DiFFUSION_ID = '085c912e4bbbdbba0b014af5321b0f17bab88df54c63b1dcd8c4b0d491f028c6'
+#     client = docker.from_env()
+#     try:
+#         container = client.containers.get(STABLE_DiFFUSION_ID)
+#         container.restart()
+#         await ctx.reply(f'The stable diffusion Docker container has been restarted')
+#     except docker.errors.NotFound:
+#         await ctx.reply(f'No such container')
+#     except docker.errors.APIError as e:
+#         await ctx.reply(f'An error occurred')
 
 # Run the bot
 bot.run(BOT_TOKEN)
