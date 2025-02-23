@@ -3,7 +3,7 @@ name = "discord-siffusion-bot"
 version = "0.1.0"
 description = "A Discord bot for diffusion"
 readme = "README.md"
-requires-python = "==3.10"
+requires-python = ">=3.10,<3.11"
 authors = [{ name = "Henrik Lindgren", email = "lindgrenhenrik96@gmail.com" }]
 dependencies = [
     "aiohttp==3.8.4",
@@ -38,7 +38,3 @@ dependencies = [
     "wrapt==1.15.0",
     "yarl==1.9.2",
 ]
-
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
