@@ -10,31 +10,56 @@ import time
 
 import aiohttp
 import discord
-import openai
 import requests
 from discord.ext import commands
-from dotenv import load_dotenv
-from requests.exceptions import ConnectionError, Timeout, TooManyRedirects
-
-# Load environment variables
-load_dotenv()
+from google import genai
+from google.genai import types
 
 API_URL = os.getenv("API_URL")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# Check if environment variables are set
-if not API_URL or not OPENAI_API_KEY or not BOT_TOKEN:
+if not API_URL or not GEMINI_API_KEY or not BOT_TOKEN:
     raise EnvironmentError(
         "Environment variables not set correctly. Please check your .env file."
     )
 
-# Set OpenAI API key
-openai.api_key = OPENAI_API_KEY
+CLIENT = genai.Client(api_key=GEMINI_API_KEY)
 
-semaphore = asyncio.Lock()  # Semaphore to control access
+MODEL_ID = "gemini-2.0-flash"
+MODEL_ID = "gemini-2.0-flash-thinking-exp-01-21"
+MODEL_ID = "gemini-2.0-flash-lite-preview-02-05"
 
-# Create bot instance
+SYS_INSTRUCT = "You are a cat. Your name is Neko."
+SYS_INSTRUCT = (
+    "You are a gen z teen with hella rizz and swag, respond as if you have it, "
+    "cap, rizz for real etc, The user text is a prompt that will generate a picture "
+    "using stable diffusion, respond a roast on why the prompt is bad using rizz, "
+    "more rizz, more emotes."
+)
+MAX_OUTPUT_TOKENS = 50
+
+
+def chat_response_api(
+    arg,
+    client=CLIENT,
+    model=MODEL_ID,
+    system_instruction=SYS_INSTRUCT,
+    max_output_tokens=MAX_OUTPUT_TOKENS,
+):
+    response = client.models.generate_content(
+        model=model,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            max_output_tokens=max_output_tokens,  # temperature=0.1
+        ),
+        contents=arg,
+    )
+
+    return response.text
+
+
+semaphore = asyncio.Lock()
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -44,7 +69,6 @@ def parse_command(commands):
     """Parse the command string into separate arguments"""
     parser = argparse.ArgumentParser()
 
-    # Define arguments
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--batch_size", type=int, required=False, default=1)
     parser.add_argument("--cfg_scale", type=int, required=False, default=7)
@@ -205,14 +229,14 @@ async def diffusion(ctx, *, args):
         print(f"Error getting stable diffusion from network: {e}")
         await ctx.reply(f"An error occurred: {str(e)}")
     finally:
-        fetch_task.cancel()  # Cancel the fetch_progress coroutine
+        fetch_task.cancel()
         semaphore.release()
 
     if SUCCESS and (random.random() < 0.25):
-        await ctx.reply(await generate_prompt_resp(payload["prompt"]))
+        await ctx.reply(chat_response_api(payload["prompt"]))
     elif SKIP:
         await ctx.reply(
-            await generate_prompt_resp(
+            chat_response_api(
                 "An error has occurred, an image was not able to be generated from the stable diffusion neural network"
             )
         )
@@ -232,7 +256,9 @@ async def diffusion(ctx, *, args):
     await safe_add_reaction(ctx.message, "\u2705")  # Checkmark emoji
 
     duration = time.time() - start_time
-    # await ctx.reply(f"It took me {duration:.2f} seconds to create an image based on '{prompt}'.")
+    await ctx.reply(
+        f"It took me {duration:.2f} seconds to create an image based on '{payload['prompt']}'."
+    )
 
 
 async def safe_remove_reaction(message, emoji, user, max_retries=5):
@@ -275,62 +301,20 @@ async def safe_add_reaction(message, emoji, max_retries=5):
 
 @bot.command()
 async def chat(ctx, *args):
-    """Chat command handler"""
+    """Chat command handler using Gemini API"""
     arg = " ".join(args)
-    model = "gpt-4o-mini"
-    try:
-        response = await retry_openai_request(
-            openai.ChatCompletion.create,
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": arg},
-            ],
-        )
 
-        chat_response = response["choices"][0]["message"]["content"]
+    try:
+        chat_response = chat_response_api(arg)
+
         max_message_length = 2000
         while len(chat_response) > max_message_length:
             await ctx.reply(chat_response[:max_message_length])
             chat_response = chat_response[max_message_length:]
         await ctx.reply(chat_response)
-    except openai.error.InvalidRequestError as e:
+
+    except Exception as e:
         await ctx.reply(f"Error: {str(e)}")
-
-
-async def retry_openai_request(request_function, *args, max_retries=5, **kwargs):
-    """Retries a given OpenAI API request function upon connection failure."""
-    for attempt in range(max_retries):
-        try:
-            return request_function(*args, **kwargs)
-        except (
-            openai.error.APIConnectionError,
-            openai.error.Timeout,
-            ConnectionError,
-            Timeout,
-            TooManyRedirects,
-        ) as e:
-            print(
-                f"Error communicating with OpenAI: {e}. Retrying ({attempt + 1}/{max_retries})..."
-            )
-            await asyncio.sleep(2**attempt)
-    raise Exception(f"Failed to complete OpenAI request after {max_retries} attempts")
-
-
-async def generate_prompt_resp(arg):
-    response = await retry_openai_request(
-        openai.ChatCompletion.create,
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "you are a gen z teen with hella rizz and swag, respond as if you have it, cap, rizz for real etc, The user text is a prompt that will generate a picture using stable diffusion, respond a roast on why the prompt is bad using rizz, more rizz, more emotes",
-            },
-            {"role": "user", "content": arg},
-        ],
-    )
-    chat_response = response["choices"][0]["message"]["content"]
-    return chat_response
 
 
 @bot.command(name="meme")
@@ -342,18 +326,5 @@ async def meme(ctx):
     await ctx.send(memes)
 
 
-# @bot.command()
-# async def rs_nn(ctx, *args):
-#     STABLE_DiFFUSION_ID = '085c912e4bbbdbba0b014af5321b0f17bab88df54c63b1dcd8c4b0d491f028c6'
-#     client = docker.from_env()
-#     try:
-#         container = client.containers.get(STABLE_DiFFUSION_ID)
-#         container.restart()
-#         await ctx.reply(f'The stable diffusion Docker container has been restarted')
-#     except docker.errors.NotFound:
-#         await ctx.reply(f'No such container')
-#     except docker.errors.APIError as e:
-#         await ctx.reply(f'An error occurred')
-
-# Run the bot
-bot.run(BOT_TOKEN)
+if __name__ == "__main__":
+    bot.run(BOT_TOKEN)
