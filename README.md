@@ -1,8 +1,3 @@
-pip freeze > requirements.txt
-source .venv/bin/activate
-python bot.py
-
-
 docker stop my-running-app
 docker rm my-running-app
 docker build -t my-python-app .

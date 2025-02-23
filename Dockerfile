@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY . /app
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --use-feature=fast-deps --use-feature=in-tree-build .
 
-CMD [ "python", "./bot.py" ]
+CMD [ "python", "./main.py" ]
