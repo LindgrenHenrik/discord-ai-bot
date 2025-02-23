@@ -1,0 +1,10 @@
+services:
+  discord-bot:
+    build: .
+    environment:
+      - API_URL=${API_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - BOT_TOKEN=${BOT_TOKEN}
+    volumes:
+      - .:/app
+    restart: unless-stopped
