@@ -319,11 +319,39 @@ async def chat(ctx, *args):
 
 @bot.command(name="meme")
 async def meme(ctx):
-    response = requests.get("https://meme-api.com/gimme")
-    json_data = json.loads(response.text)
-    memes = json_data["url"]
+    """Sends a meme from meme-api.com"""
+    try:
+        response = requests.get("https://meme-api.com/gimme")
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        json_data = response.json()
 
-    await ctx.send(memes)
+        # Debugging: Print the entire json_data to inspect its structure
+        print(f"Meme API Response: {json_data}")
+
+        if "url" in json_data:
+            memes = json_data["url"]
+            await ctx.send(memes)
+        else:
+            await ctx.reply("Error: Could not find meme URL in API response.")
+            print(
+                f"Error: Meme API response missing 'url' key: {json_data}"
+            )  # Log if url is missing
+
+    except requests.exceptions.RequestException as e:
+        await ctx.reply(f"Error fetching meme: {e}")
+        print(f"Error fetching meme from API: {e}")  # Log request exceptions
+    except json.JSONDecodeError as e:
+        await ctx.reply("Error decoding meme API response.")
+        print(
+            f"Error decoding meme API JSON: {e}. Response text: {response.text}"
+        )  # Log JSON decode errors
+    except KeyError as e:
+        await ctx.reply(
+            f"Error accessing meme data. Missing key: {e}"
+        )  # More specific KeyError message
+        print(
+            f"KeyError accessing meme data: {e}. JSON data: {json_data}"
+        )  # Log KeyError with data
 
 
 if __name__ == "__main__":
