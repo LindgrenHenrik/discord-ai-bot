@@ -215,7 +215,7 @@ async def diffusion(ctx, *, args):
     fetch_task = bot.loop.create_task(fetch_progress(ctx, ctx.message))
 
     SUCCESS = False
-    SKIP = True
+    SKIP = False
     try:
         print(f"Starting diffusion request from {ctx.message.author} with args: {args}")
         payload, parse_error = parse_command(args)
@@ -237,7 +237,7 @@ async def diffusion(ctx, *, args):
         await ctx.reply(
             'Error: Incorrect command usage.\n Here is an exapmle or use !info to get full command info: \n!diffusion --prompt "kexchoklad" --steps 10 --batch_size 1 --cfg_scale 7'
         )
-        SKIP = False
+        SKIP = True
     except Exception as e:
         print(f"Error getting stable diffusion from network: {e}")
         await ctx.reply(f"An error occurred: {str(e)}")
@@ -247,7 +247,7 @@ async def diffusion(ctx, *, args):
 
     if SUCCESS and (random.random() < 0.25):
         await ctx.reply(chat_response_api(payload["prompt"]))
-    elif not SKIP:
+    elif SKIP:
         await ctx.reply(
             chat_response_api(
                 "An error has occurred, an image was not able to be generated from the stable diffusion neural network"
