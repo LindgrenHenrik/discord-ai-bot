@@ -64,6 +64,13 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+TARGET_CHANNEL_NAME = "image-generation"
+
+
+def is_in_target_channel(ctx):
+    """Checks if the command was invoked in the target channel."""
+    return ctx.guild and ctx.channel.name == TARGET_CHANNEL_NAME
+
 
 def parse_command(commands):
     """Parse the command string into separate arguments"""
@@ -116,6 +123,8 @@ async def send_images(images, ctx):
 @bot.command()
 async def info(ctx):
     """Info command handler"""
+    if not is_in_target_channel(ctx):
+        return
     await ctx.reply(
         "The `!diffusion` command is used to generate images based on the provided prompt.\n"
         'Usage: `!diffusion --prompt "your prompt here" [--steps num_steps] [--batch_size num] [--cfg_scale scale]`\n'
@@ -176,6 +185,8 @@ async def fetch_progress(ctx, message):
 @bot.command(name="hello")
 async def hello(ctx):
     """Hello command handler"""
+    if not is_in_target_channel(ctx):
+        return
     user_id = ctx.message.author.id
     user_responses = {
         os.getenv("NIBBE"): "wassup",
@@ -190,6 +201,8 @@ async def hello(ctx):
 @bot.command()
 async def diffusion(ctx, *, args):
     """Diffusion command handler"""
+    if not is_in_target_channel(ctx):
+        return
 
     start_time = time.time()  # start a timer
 
@@ -234,7 +247,7 @@ async def diffusion(ctx, *, args):
 
     if SUCCESS and (random.random() < 0.25):
         await ctx.reply(chat_response_api(payload["prompt"]))
-    elif SKIP:
+    elif not SKIP:
         await ctx.reply(
             chat_response_api(
                 "An error has occurred, an image was not able to be generated from the stable diffusion neural network"
@@ -302,6 +315,8 @@ async def safe_add_reaction(message, emoji, max_retries=5):
 @bot.command()
 async def chat(ctx, *args):
     """Chat command handler using Gemini API"""
+    if not is_in_target_channel(ctx):
+        return
     arg = " ".join(args)
 
     try:
