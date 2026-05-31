@@ -1,2 +1,10 @@
 .venv
 .env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+token.json
+credentials.json
+client_secret*.json
